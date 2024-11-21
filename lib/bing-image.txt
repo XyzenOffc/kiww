@@ -1,0 +1,149 @@
+/**
+ * Base By Siputzx
+ * Created On 22/2/2024
+ * Contact Me on wa.me/6288292024190
+ * Supported By Gpt Assistant
+ */
+const fetch = require("node-fetch");
+const cheerio = require("cheerio");
+const bingUrl = "https://www.bing.com";
+
+class BingApi {
+  constructor(cookie) {
+    this.cookie = cookie;
+    this.headers = {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.5",
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Alt-Used": "www.bing.com",
+      "Upgrade-Insecure-Requests": "1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-Fetch-User": "?1",
+      Cookie: `_U=${cookie};`,
+      "X-Forwarded-For": `20.${this.getRandomNum()}.${this.getRandomNum()}.${this.getRandomNum()}`,
+    };
+  }
+
+  async createImages(prompt, isSlowMode) {
+    try {
+      const payload = `q=${encodeURIComponent(prompt)}`;
+      let credits = await this.getCredits();
+      if (!credits) {
+        credits = 0;
+      }
+      let response = await this.sendRequest(
+        credits > 0 ? isSlowMode : true,
+        payload,
+      );
+
+      if (response.status === 200) {
+        const responseHtml = await response.text();
+        const $ = cheerio.load(responseHtml);
+        const errorAmount = $(".gil_err_img.rms_img").length;
+        if (!isSlowMode && credits > 0 && $("#gilen_son").hasClass("show_n")) {
+          throw "Dalle-3 is currently unavailable due to high demand";
+        } else if (
+          $("#gilen_son").hasClass("show_n") ||
+          (errorAmount === 2 && credits > 0 && isSlowMode)
+        ) {
+          throw "Slow mode is currently unavailable due to high demand";
+        } else if (errorAmount === 2) {
+          throw "Invalid cookie";
+        } else if (errorAmount === 4) {
+          throw "Prompt has been blocked";
+        } else {
+          throw "Unknown error";
+        }
+      }
+
+      const eventId = response.headers.get("x-eventid");
+      return await this.retrieveImages(eventId);
+    } catch (error) {
+      console.log(`error is ${error}`);
+    }
+  }
+
+  async getCredits() {
+    const response = await fetch(`${bingUrl}/create`, {
+      headers: this.headers,
+      method: "GET",
+      mode: "cors",
+    });
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    return $("#token_bal").text();
+  }
+
+  getRandomNum() {
+    return Math.floor(Math.random() * 254) + 1;
+  }
+
+  async sendRequest(isSlowMode, payload) {
+    try {
+      const response = await fetch(
+        `${bingUrl}/images/create?${payload}&rt=${isSlowMode ? "3" : "4"}`,
+        {
+          headers: this.headers,
+          method: "POST",
+          mode: "cors",
+          redirect: "manual",
+        },
+      );
+
+      return response;
+    } catch (error) {
+      console.log("Error in sendRequest:", error);
+    }
+  }
+
+  async retrieveImages(eventId) {
+    try {
+      while (true) {
+        const images = await fetch(
+          `${bingUrl}/images/create/async/results/1-${eventId}`,
+          {
+            headers: this.headers,
+            method: "GET",
+            mode: "cors",
+          },
+        );
+
+        const html = await images.text();
+
+        if (html.includes(`"errorMessage":"Pending"`)) {
+          throw "Error occurred";
+        }
+
+        let results = [];
+
+        if (html === "") {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+          continue;
+        }
+
+        const $ = cheerio.load(html);
+        for (let i = 0; i < $(".mimg").length; i++) {
+          const badLink = $(".mimg")[i].attribs.src;
+          const goodLink = badLink.slice(0, badLink.indexOf("?")); // Delete the parameters
+
+          results.push(goodLink);
+        }
+
+        return results;
+      }
+    } catch (error) {
+      console.log(`Error in retrieveImages: ${error}`);
+    }
+  }
+}
+
+const apikyst = ["1jypdq5cz4eJyz5tYz0L8pJAQ5A9_uKO8UqNjBa4EGGXMQhtCaaR5P6DPABq-hHbZueQyE8CeN2MLE697lEJiqWjlHerQEnIu3KkJ7dbaDwnCHP13K3oTmUQg9Kh30LQNjJdj--mdA5aJFzqdISTEJ0kju-YqVSSHWNtlFKRqTdmtEOc5Vo0q0aILJhBB7KWdcxpwnvmX55lHNi4zR3stWP1f53DUn8rO4bMcHc_KXjY","1w8myTtc850tD36m5h7Os4aFsgcOOxnx6h49umqSWATu7wP3_9KdKWBEglkNCdhAsHQ58uVbeWbTMNr8bpGlKC8EQ6URG-ncUbKezVdjfkLR6RcYOmEMKIuqI2b7b6unagzZXnLsJ50l7Td9FhGBH0FTDLKzZfz0430RTLc6NJ7nqfnzDiWDDDO5xCW3XXbMYj7lEvph0vGCIonL75O0aoNJmYpsDYLK05lTuI5P8jUg","1ms9l0fK-bhNzDjw9ioHGl3XNZCcM7OZsctUBkoxZ2FhMvkfVqahgHrzWM_WpG6OzPi3Pioo5drSOZTE4CFKlCHEkr0pm8JpUzaV5KP7EiNXIq4UyuBqeo962Hz1cS4_KAJx16muoZeoMPnqcbO7jX9vRwA0ZiefCTVQfi1lDYa14PQj-U6X93EogyXvtLHDizF6N9NNRar6lKj3H9x-9E5fX_gaUnx-ygQCn1MX0SxQ","1hszcQM5pqOzhocQnzH__-VwDiaJQqmBNZSqp_swjc4wWl2xiAxDTny82279air4J6rfjBPX9ERNKSvMTP6Tdbhk0pYJryoIDPJSiDY2HrWeRlBLFXxRROa_IQhKJDqqUyl2bjepu1sCefKD2pEwp80mw8LlS0G8TJkhs0rfeIgxf8bELEXoutiFUBvDmM6jxInSp6P69Wgr2rVFCrYcfZQ","1iW4h4kcdlT8xm2UUL7oe65LluPSmQbjsCyCbH79DF6kbPd216-Jht-hxD6DjnyVsKAmeHF6C7Nr_ieUBInYB5yrpT0of1qXhh1yc1vMWo03LxawI4-rWEp0k6NAMdxvGb9c02xxufyVhKrDqz899Dy6fctxfqfuRYRivAJ5mIszh_Du4VkxuoyfGkw-UE2Ag3qTer1TSrArFRjYZq7HqyE2gAKERufS9sRMYGBTI6fA", " 1Z40Rk5tfakwDKXqZLvfd3_n0RohxMlBydYOiWct3jKNMJW6QoQOjW0Y0Rlc3A6oE0Q20uT9L4hyrWKYd41z3B7Qf6UU1bthyixN7PoEYkw-OixKRYRFAYgVy20v0ULHZbouQNAPt1tHlgzz12SLvCGrCjIZ3edtDaRcP3c5VSrOKT0TnwNdSeKUfM-Cy1RSqnuIlda24EXT2MqrsZcgCFQ", "1cCvElMQ71sg5nYcZ7F0sNFU1wZ8taBQIA2Yz4TWVU8HdCEJij1VSbLAc70pE_wzQPX2hUEBxSIVtka8pRwfJ-JxGl8S2uruWBMDq63BFGEX1cyWkzi7HZK7iJYY1Dz5f5mZE1fcusFxuMPN4u8-muI-WVWfTrh1DQ4LUVOpX-8580j-1I7w4Eu2mq58aNqY46kTqK8WY6OIkRR_0kci_3w", "1lOD2TWQpEjLbSQu6d_Md-u4A7AuNbHpzPUiS4HKaryukZeCLrBb9BMiTtD4Q6juhXx-8Cfe6qjM7qlJ1BYU6QD6k8q9j73VgDXqwclO_tQ0fTJNl3TcoT2UUj09BpN7S0M9n5v_IbNx20sDW5HVUWw9bkGiYq2c52enyVvgiGZ_rlmZ6_IpgHy8f2ccz8Yf369bPPBNAp4x9nF6VC9HaDQ", "1kQ1Mx3t8nWO8L-g8QcUfR4ES2a9zt736rikAfBGjSntyp_Q9rWWHaQv4KlMNJCJgjU19xfFAeLJ4iXuYw5LemWZI4D0UDqzxabTeKCrRvHUS35Xlcggf3hWuelhqyCSYaoK5DtXXq-E0FINMwMLAuxKlxZJgga3n1_Ae--0W5j40OQ4_utgs_6JldpsnY_YEgbbIQsk3to2Js2lHfIAv2g"];
+
+const apikeybing = apikyst[Math.floor(apikyst.length * Math.random())];
+
+module.exports = { BingApi, apikeybing };
